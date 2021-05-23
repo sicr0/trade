@@ -1,4 +1,4 @@
--module(trade_fsm).
+-module(trade_statem).
 -behaviour(gen_statem).
 
 % Public API
