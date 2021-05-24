@@ -1,5 +1,5 @@
 -module(trade_calls).
--compile(export_all).
+-export([main_ab/0, main_cd/0, main_ef/0])
 
 %% test a little bit of everything and also deadlocks on ready state
 %% -- leftover messages possible on race conditions on ready state
