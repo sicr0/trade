@@ -29,7 +29,7 @@ ready(OwnPid) -> gen_statem:call(OwnPid, ready, infinity).
 cancel(OwnPid) -> gen_statem:stop(OwnPid).
 
 % Client-To-Client API
-ask_negotiate(OtherPid, OwnPid) -> gen_statem:cast(OtherPid, {ask_negotiate, OwnPid}).
+ask_negotiate(OtherPid, OwnPid) -> en_statem:cast(OtherPid, {ask_negotiate, OwnPid}).
 
 accept_negotiate(OtherPid, OwnPid) -> gen_statem:cast(OtherPid, {accept_negotiate, OwnPid}).
 
@@ -90,25 +90,21 @@ idle({call, From}, {negotiate, OtherPid}, D = #data{}) ->
     notice(D, "asking user ~p for a trade", [OtherPid]),
     Ref = monitor(process, OtherPid),
     {next_state, idle_wait, D#data{other = OtherPid, monitor = Ref, from = From}};
-idle(_, Event, Data) ->
+idle(_, Event, _) ->
     unexpected(Event, idle),
-    {next_state, idle, Data}.
+    keep_state_and_data.
 
-idle_wait(cast, accept_negotiate, D = #data{other = OtherPid}) ->
-    accept_negotiate(OtherPid, self()),
-    notice(D, "accepting negotiation", []),
-    {reply, ok, negotiate, D};
+idle_wait(cast, accept_negotiate, Data) ->
+    accept_negotiate(Data#data.other, self()),
+    notice(Data, "accepting negotiation", []),
+    {next_state, negotiate, Data};
 idle_wait({call, _}, {ask_negotiate, OtherPid}, D = #data{other = OtherPid}) ->
     gen_statem:reply(D#data.from, ok),
     notice(D, "starting negotiation", []),
     {next_state, negotiate, D};
-idle_wait({call, _}, {accept_negotiate, OtherPid}, D = #data{other = OtherPid}) ->
-    gen_statem:reply(D#data.from, ok),
-    notice(D, "starting negotiation", []),
-    {next_state, negotiate, D};
-idle_wait(_, Event, Data) ->
+idle_wait(_, Event, _) ->
     unexpected(Event, idle_wait),
-    {next_state, idle_wait, Data}.
+    keep_state_and_data.
 
 negotiate(cast, {make_offer, Item}, D = #data{own_items = OwnItems}) ->
     do_offer(D#data.other, Item),
@@ -124,37 +120,37 @@ negotiate(cast, {do_offer, Item}, D = #data{other_items = OtherItems}) ->
 negotiate(cast, {undo_offer, Item}, D = #data{other_items = OtherItems}) ->
     notice(D, "Other player cancelling offer on ~p", [Item]),
     {next_state, negotiate, D#data{other_items = remove(Item, OtherItems)}};
-negotiate(cast, are_you_ready, D = #data{other = OtherPid}) ->
+negotiate(cast, {are_you_ready}, D = #data{other = OtherPid}) ->
     io:format("Other user ready to trade~n"),
     notice(D, "Other user ready to transfer goods:~nYou get ~p, the other side gets ~p", [D#data.other_items, D#data.own_items]),
     not_yet(OtherPid),
     {next_state, negotiate, D};
-negotiate({call, From}, ready, D = #data{other = OtherPid}) ->
+negotiate({call, From}, {ready}, D = #data{other = OtherPid}) ->
     are_you_ready(OtherPid),
     notice(D, "asking if ready, waiting", []),
     {next_state, wait, D#data{from = From}};
-negotiate(_, Event, Data) ->
+negotiate(_, Event, _) ->
     unexpected(Event, negotiate),
-    {next_state, negotiate, Data}.
+    keep_state_and_data.
 
-wait(cast, are_you_ready, D = #data{}) ->
+wait(cast, {are_you_ready}, D = #data{}) ->
     am_ready(D#data.other),
     notice(D, "asked if ready, and I am. Waiting for same reply", []),
     {next_state, wait, D};
-wait(cast, not_yet, D = #data{}) ->
+wait(cast, {not_yet}, D = #data{}) ->
     notice(D, "Other not ready yet", []),
     {next_state, wait, D};
-wait(cast, ready, D = #data{}) ->
+wait(cast, {ready}, D = #data{}) ->
     am_ready(D#data.other),
     ack_trans(D#data.other),
     gen_statem:reply(D#data.from, ok),
     notice(D, "other side is ready. Moving to ready state", []),
     {next_state, ready, D};
-wait(_, Event, Data) ->
+wait(_, Event, _) ->
     unexpected(Event, wait),
-    {next_state, wait, Data}.
+    keep_state_and_data.
 
-ready(cast, ack, D = #data{}) ->
+ready(cast, {ack}, D = #data{}) ->
     case priority(self(), D#data.other) of
         true ->
             try
@@ -172,16 +168,16 @@ ready(cast, ack, D = #data{}) ->
         false ->
             {next_state, ready, D}
     end;
-ready(cast, ask_commit, D) ->
+ready(cast, {ask_commit}, D) ->
     notice(D, "replying to ask commit", []),
     {reply, ready_commit, ready, D};
-ready(cast, do_commit, D) ->
+ready(cast, {do_commit}, D) ->
     notice(D, "committing...", []),
     commit(D),
     {stop, normal, ok, D};
-ready(_, Event, Data) ->
+ready(_, Event, _) ->
     unexpected(Event, ready),
-    {next_state, ready, Data}.
+    keep_state_and_data.
 
 % Private functions
 add (Item, Items) -> [Item | Items].
