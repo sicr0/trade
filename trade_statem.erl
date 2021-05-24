@@ -84,7 +84,7 @@ idle_wait(cast, {accept_negotiate, OtherPid}, D = #data{other = OtherPid}) ->
 idle_wait({call, From}, accept_negotiate, D = #data{other = OtherPid}) ->
     accept_negotiate(OtherPid, self()),
     notice(D, "accepting negotiation", []),
-    {next_state, negotiate, D, {reply, From, D}};
+    {next_state, negotiate, D, {reply, From, ok}};
 idle_wait(_, Event, _) ->
     unexpected(Event, idle_wait),
     keep_state_and_data.
@@ -92,22 +92,22 @@ idle_wait(_, Event, _) ->
 negotiate(cast, {make_offer, Item}, D = #data{own_items = OwnItems}) ->
     do_offer(D#data.other, Item),
     notice(D, "offering ~p", [Item]),
-    {next_state, negotiate, D#data{own_items = OwnItems}};
+    {keep_state, D#data{own_items = add(Item, OwnItems)}};
 negotiate(cast, {retract_offer, Item}, D = #data{own_items = OwnItems}) ->
     undo_offer(D#data.other, Item),
     notice(D, "cancelling offer on ~p", [Item]),
-    {next_state, negotiate, D#data{own_items = remove(Item, OwnItems)}};
+    {keep_state, D#data{own_items = remove(Item, OwnItems)}};
 negotiate(cast, {do_offer, Item}, D = #data{other_items = OtherItems}) ->
     notice(D, "other player offering ~p", [Item]),
-    {next_state, negotiate, D#data{other_items = add(Item, OtherItems)}};
+    {keep_state, D#data{other_items = add(Item, OtherItems)}};
 negotiate(cast, {undo_offer, Item}, D = #data{other_items = OtherItems}) ->
     notice(D, "Other player cancelling offer on ~p", [Item]),
-    {next_state, negotiate, D#data{other_items = remove(Item, OtherItems)}};
+    {keep_state, D#data{other_items = remove(Item, OtherItems)}};
 negotiate(cast, are_you_ready, D = #data{other = OtherPid}) ->
     io:format("Other user ready to trade~n"),
     notice(D, "Other user ready to transfer goods:~nYou get ~p, the other side gets ~p", [D#data.other_items, D#data.own_items]),
     not_yet(OtherPid),
-    {next_state, negotiate, D};
+    keep_state_and_data;
 negotiate({call, From}, ready, D = #data{other = OtherPid}) ->
     are_you_ready(OtherPid),
     notice(D, "asking if ready, waiting", []),
@@ -133,7 +133,7 @@ wait(_, Event, _) ->
     unexpected(Event, wait),
     keep_state_and_data.
 
-ready(cast, ack, D = #data{}) ->
+ready({call, _}, ack, D = #data{}) ->
     case priority(self(), D#data.other) of
         true ->
             try
@@ -153,11 +153,11 @@ ready(cast, ack, D = #data{}) ->
         false ->
             keep_state_and_data
     end;
-ready(cast, ask_commit, D) ->
+ready({call, From}, ask_commit, D) ->
     notice(D, "replying to ask commit", []),
     % Sus
-    {reply, ready_commit, ready, D};
-ready(cast, do_commit, D) ->
+    {keep_state_and_data, {reply, From, ready_commit}};
+ready({call, _}, do_commit, D) ->
     notice(D, "committing...", []),
     commit(D),
     % Sus
