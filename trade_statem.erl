@@ -41,7 +41,7 @@ are_you_ready(OtherPid) -> gen_statem:cast(OtherPid, are_you_ready).
 
 not_yet(OtherPid) -> gen_statem:cast(OtherPid, not_yet).
 
-am_ready(OtherPid) -> gen_statem:cast(OtherPid, ready).
+am_ready(OtherPid) -> gen_statem:cast(OtherPid, 'ready!').
 
 ack_trans(OtherPid) -> gen_statem:cast(OtherPid, ack).
 
@@ -78,8 +78,8 @@ idle_wait(cast, {ask_negotiate, OtherPid}, D = #data{other = OtherPid}) ->
     notice(D, "starting negotiation", []),
     {next_state, negotiate, D};
 idle_wait(cast, {accept_negotiate, OtherPid}, D = #data{other = OtherPid}) ->
-    accept_negotiate(OtherPid, self()),
-    notice(D, "accepting negotiation", []),
+    gen_statem:reply(D#data.from, ok),
+    notice(D, "starting negotiation", []),
     {next_state, negotiate, D};
 idle_wait({call, From}, accept_negotiate, D = #data{other = OtherPid}) ->
     accept_negotiate(OtherPid, self()),
@@ -112,10 +112,18 @@ negotiate({call, From}, ready, D = #data{other = OtherPid}) ->
     are_you_ready(OtherPid),
     notice(D, "asking if ready, waiting", []),
     {next_state, wait, D#data{from = From}};
-negotiate(EventType, Event, Data) ->
-    unexpected({EventType, Event, Data}, negotiate),
+negotiate(_, Event, _) ->
+    unexpected(Event, negotiate),
     keep_state_and_data.
 
+wait(cast, {do_offer, Item}, D = #data{other_items = OtherItems}) ->
+    gen_statem:reply(D#data.from, offer_changed),
+    notice(D, "Other side offering ~p", [Item]),
+    {next_state, negotiate, D#data{other_items = add(Item, OtherItems)}};
+wait(cast, {undo_offer, Item}, D = #data{other_items = OtherItems}) ->
+    gen_statem:reply(D#data.from, offer_changed),
+    notice(D, "other side cancelling offer ~p", [Item]),
+    {next_state, negotiate, D#data{other_items = remove(Item, OtherItems)}};
 wait(cast, are_you_ready, D = #data{}) ->
     am_ready(D#data.other),
     notice(D, "asked if ready, and I am. Waiting for same reply", []),
@@ -123,7 +131,7 @@ wait(cast, are_you_ready, D = #data{}) ->
 wait(cast, not_yet, D = #data{}) ->
     notice(D, "Other not ready yet", []),
     keep_state_and_data;
-wait(cast, ready, D = #data{}) ->
+wait(cast, 'ready!', D = #data{}) ->
     am_ready(D#data.other),
     ack_trans(D#data.other),
     gen_statem:reply(D#data.from, ok),
@@ -133,7 +141,7 @@ wait(_, Event, _) ->
     unexpected(Event, wait),
     keep_state_and_data.
 
-ready({call, _}, ack, D = #data{}) ->
+ready(cast, ack, D = #data{}) ->
     case priority(self(), D#data.other) of
         true ->
             try
@@ -143,11 +151,9 @@ ready({call, _}, ack, D = #data{}) ->
                 ok = do_commit(D#data.other),
                 notice(D, "committing...", []),
                 commit(D),
-                % Sus
                 {stop, normal, D}
             catch Class:Reason ->
                 notice(D, "commit failed", []),
-                % Sus
                 {stop, {Class, Reason}, D}
             end;
         false ->
@@ -156,12 +162,12 @@ ready({call, _}, ack, D = #data{}) ->
 ready({call, From}, ask_commit, D) ->
     notice(D, "replying to ask commit", []),
     % Sus
-    {keep_state_and_data, {reply, From, ready_commit}};
+    {keep_state_and_data, [{reply, From, ready_commit}]};
 ready({call, _}, do_commit, D) ->
     notice(D, "committing...", []),
     commit(D),
     % Sus
-    {stop, normal, ok, D};
+    {stop, normal, D};
 ready(_, Event, _) ->
     unexpected(Event, ready),
     keep_state_and_data.
